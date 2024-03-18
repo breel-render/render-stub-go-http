@@ -1,4 +1,4 @@
-module render-stub-go-http
+module github.com/breel-render/render-stub-go-http
 
 go 1.21.4
 
