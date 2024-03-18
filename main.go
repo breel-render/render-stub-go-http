@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"golang.org/x/time/rate"
 )
@@ -39,11 +41,13 @@ func main() {
 		limiter.Wait(r.Context())
 		headers, _ := json.MarshalIndent(r.Header, "   ", "   ")
 		body, _ := io.ReadAll(r.Body)
-		fmt.Fprintf(w, "%s %s\n%s\n   %s\n",
-			r.Method, r.URL,
-			headers,
-			body,
-		)
+		for _, w := range []io.Writer{w, log.Writer()} {
+			fmt.Fprintf(w, "[%s] %s %s\n%s\n   %s\n",
+				time.Now(), r.Method, r.URL,
+				headers,
+				body,
+			)
+		}
 	})); err != nil {
 		panic(err)
 	}
