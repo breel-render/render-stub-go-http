@@ -14,8 +14,11 @@ import (
 )
 
 var (
-	Listen = envOr("LISTEN", ":8080")
-	RPS    = mustFloat(envOr("RPS", "3"))
+	Listen = envOr(
+		"LISTEN",
+		fmt.Sprintf(":%s", envOr("PORT", "8080")),
+	)
+	RPS = mustFloat(envOr("RPS", "3"))
 )
 
 func envOr(k, v string) string {
