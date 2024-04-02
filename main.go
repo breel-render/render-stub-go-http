@@ -43,11 +43,15 @@ func main() {
 	if err := http.ListenAndServe(Listen, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		limiter.Wait(r.Context())
 		headers, _ := json.MarshalIndent(r.Header, "   ", "   ")
-		body, _ := io.ReadAll(r.Body)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			body = []byte(fmt.Sprintf("(failed to read body: %v)", err))
+		}
 		for _, w := range []io.Writer{w, log.Writer()} {
-			fmt.Fprintf(w, "[%s] %s %s\n%s\n   %s\n",
+			fmt.Fprintf(w, "[%s] %s %s\n%s\n   (%d==%d) %s\n",
 				time.Now(), r.Method, r.URL,
 				headers,
+				len(body), r.ContentLength,
 				body,
 			)
 		}
