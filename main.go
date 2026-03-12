@@ -57,6 +57,7 @@ func main() {
 
 func run(ctx context.Context) error {
 	limiter := rate.NewLimiter(rate.Limit(RPS), 1)
+	lastNRequests := make([]string, 0, 50)
 	s := &http.Server{
 		Addr: Listen,
 		BaseContext: func(net.Listener) context.Context {
@@ -100,6 +101,11 @@ func run(ctx context.Context) error {
 					"body":           string(body),
 				})
 				output = string(js)
+			}
+
+			lastNRequests = append(lastNRequests, output)
+			for len(lastNRequests) > 50 {
+				lastNRequests = lastNRequests[1:]
 			}
 
 			for _, w := range []io.Writer{w, log.Writer()} {
