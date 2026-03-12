@@ -57,13 +57,18 @@ func main() {
 
 func run(ctx context.Context) error {
 	limiter := rate.NewLimiter(rate.Limit(RPS), 1)
-	lastNRequests := make([]string, 0, 50)
+	lastNRequests := make([]any, 0, 50)
 	s := &http.Server{
 		Addr: Listen,
 		BaseContext: func(net.Listener) context.Context {
 			return ctx
 		},
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/__history__" {
+				json.NewEncoder(w).Encode(lastNRequests)
+				return
+			}
+
 			limiter.Wait(r.Context())
 			headers, _ := json.MarshalIndent(r.Header, "   ", "   ")
 
@@ -84,14 +89,15 @@ func run(ctx context.Context) error {
 				body = []byte(fmt.Sprintf("(failed to read body: %v)", err))
 			}
 
-			output := fmt.Sprintf("[%s] %s %s\n%s\n   (%d==%d) %s\n",
+			var outputPayload any = fmt.Sprintf("[%s] %s %s\n%s\n   (%d==%d) %s\n",
 				time.Now(), r.Method, r.URL,
 				headers,
 				len(body), r.ContentLength,
 				body,
 			)
+			output := fmt.Sprint(outputPayload)
 			if JSON {
-				js, _ := json.Marshal(map[string]any{
+				outputPayload = map[string]any{
 					"now":            time.Now(),
 					"method":         r.Method,
 					"url":            r.URL.String(),
@@ -99,11 +105,12 @@ func run(ctx context.Context) error {
 					"body-length":    len(body),
 					"content-length": r.ContentLength,
 					"body":           string(body),
-				})
-				output = string(js)
+				}
+				b, _ := json.Marshal(outputPayload)
+				output = string(b)
 			}
 
-			lastNRequests = append(lastNRequests, output)
+			lastNRequests = append(lastNRequests, outputPayload)
 			for len(lastNRequests) > 50 {
 				lastNRequests = lastNRequests[1:]
 			}
