@@ -82,6 +82,9 @@ func run(ctx context.Context) error {
 			return ctx
 		},
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx, can := context.WithTimeout(r.Context(), time.Minute)
+			defer can()
+
 			if r.URL.Path == "/__history__" {
 				json.NewEncoder(w).Encode(lastNRequests)
 				return
