@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +20,8 @@ import (
 	"golang.ngrok.com/ngrok/config"
 
 	"golang.org/x/time/rate"
+
+	_ "github.com/lib/pq"
 )
 
 var (
@@ -28,6 +31,8 @@ var (
 	)
 	RPS  = mustFloat(envOr("RPS", "3"))
 	JSON = os.Getenv("JSON") != ""
+
+	PSQLConnString = os.Getenv("PSQL_CONN_STRING")
 )
 
 func envOr(k, v string) string {
@@ -56,6 +61,19 @@ func main() {
 }
 
 func run(ctx context.Context) error {
+	var accessLogDB *sql.DB
+	if PSQLConnString != "" {
+		db, err := sql.Open("postgres", PSQLConnString)
+		if err != nil {
+			return err
+		}
+		if err := db.PingContext(ctx); err != nil {
+			return err
+		}
+		defer db.Close()
+		accessLogDB = db
+	}
+
 	limiter := rate.NewLimiter(rate.Limit(RPS), 1)
 	lastNRequests := make([]any, 0, 50)
 	s := &http.Server{
@@ -70,7 +88,7 @@ func run(ctx context.Context) error {
 			}
 
 			limiter.Wait(r.Context())
-			headers, _ := json.MarshalIndent(r.Header, "   ", "   ")
+			headers, _ := json.MarshalIndent(r.Header, "	", "	")
 
 			var reader io.Reader = r.Body
 			switch r.Header.Get("Content-Encoding") {
@@ -89,7 +107,7 @@ func run(ctx context.Context) error {
 				body = []byte(fmt.Sprintf("(failed to read body: %v)", err))
 			}
 
-			var outputPayload any = fmt.Sprintf("[%s] %s %s\n%s\n   (%d==%d) %s\n",
+			var outputPayload any = fmt.Sprintf("[%s] %s %s\n%s\n	(%d==%d) %s\n",
 				time.Now(), r.Method, r.URL,
 				headers,
 				len(body), r.ContentLength,
@@ -113,6 +131,28 @@ func run(ctx context.Context) error {
 			lastNRequests = append(lastNRequests, outputPayload)
 			for len(lastNRequests) > 50 {
 				lastNRequests = lastNRequests[1:]
+			}
+
+			if accessLogDB != nil {
+				header, _ := json.Marshal(r.Header)
+				if _, err := accessLogDB.ExecContext(ctx, `
+					CREATE TABLE IF NOT EXISTS http_access_log (
+						at TIMESTAMP
+						, method TEXT
+						, url TEXT
+						, headers TEXT
+						, body TEXT
+					)
+				`); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				} else if _, err := accessLogDB.ExecContext(ctx, `
+					INSERT INTO http_access_log (at, method, url, headers, body)
+					VALUES (now(), $1, $2, $3, $4)
+				`, r.Method, r.URL.String(), header, string(body)); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
 			}
 
 			for _, w := range []io.Writer{w, log.Writer()} {
