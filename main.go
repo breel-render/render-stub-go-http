@@ -63,6 +63,7 @@ func main() {
 func run(ctx context.Context) error {
 	var accessLogDB *sql.DB
 	if PSQLConnString != "" {
+		log.Printf("dialing psql...")
 		db, err := sql.Open("postgres", PSQLConnString)
 		if err != nil {
 			return err
@@ -147,12 +148,14 @@ func run(ctx context.Context) error {
 						, body TEXT
 					)
 				`); err != nil {
+					log.Printf("psql: error ensuring table: %v", err)
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				} else if _, err := accessLogDB.ExecContext(ctx, `
 					INSERT INTO http_access_log (at, method, url, headers, body)
 					VALUES (now(), $1, $2, $3, $4)
 				`, r.Method, r.URL.String(), header, string(body)); err != nil {
+					log.Printf("psql: error inserting into table: %v", err)
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
