@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -53,6 +55,10 @@ func mustFloat(s string) float64 {
 }
 
 func main() {
+	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		panic(err)
+	}
 	ctx, can := signal.NotifyContext(context.Background(), syscall.SIGINT)
 	defer can()
 	if err := run(ctx); err != nil && ctx.Err() == nil {
@@ -154,7 +160,7 @@ func run(ctx context.Context) error {
 				} else if _, err := accessLogDB.ExecContext(ctx, `
 					INSERT INTO http_access_log (at, method, url, headers, body)
 					VALUES (now(), $1, $2, $3, $4)
-				`, r.Method, r.URL.String(), header, string(body)); err != nil {
+				`, r.Method, r.URL.String(), header, base64.URLEncoding.EncodeToString(body)); err != nil {
 					log.Printf("psql: error inserting into table: %v", err)
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
