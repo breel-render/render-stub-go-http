@@ -160,7 +160,7 @@ func run(ctx context.Context) error {
 				} else if _, err := accessLogDB.ExecContext(ctx, `
 					INSERT INTO http_access_log (at, method, url, headers, body)
 					VALUES (now(), $1, $2, $3, $4)
-				`, r.Method, r.URL.String(), header, base64.URLEncoding.EncodeToString(body)); err != nil {
+				`, r.Method, r.URL.String(), header, base64.StdEncoding.EncodeToString(body)); err != nil {
 					log.Printf("psql: error inserting into table: %v", err)
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
