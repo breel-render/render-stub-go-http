@@ -69,16 +69,35 @@ func main() {
 func run(ctx context.Context) error {
 	var accessLogDB *sql.DB
 	if PSQLConnString != "" {
-		log.Printf("dialing psql...")
-		db, err := sql.Open("postgres", PSQLConnString)
-		if err != nil {
-			return err
-		}
-		if err := db.PingContext(ctx); err != nil {
-			return err
-		}
-		defer db.Close()
-		accessLogDB = db
+		go func() {
+			for {
+				if err := func() error {
+					log.Printf("dialing psql...")
+					db, err := sql.Open("postgres", PSQLConnString)
+					if err != nil {
+						return err
+					}
+					if err := db.PingContext(ctx); err != nil {
+						defer db.Close()
+						return err
+					}
+					accessLogDB = db
+					return nil
+				}(); err == nil {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(5 * time.Second):
+				}
+			}
+		}()
+		defer func() {
+			if accessLogDB != nil {
+				accessLogDB.Close()
+			}
+		}()
 	}
 
 	limiter := rate.NewLimiter(rate.Limit(RPS), 1)
