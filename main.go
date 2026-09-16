@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -68,8 +69,10 @@ func main() {
 
 func run(ctx context.Context) error {
 	var accessLogDB *sql.DB
-	if PSQLConnString != "" {
-		go func() {
+	if PSQLConnString == "" {
+	} else if err := func() error {
+		if err := func() error {
+			defer log.Printf("dialed psql...")
 			for {
 				if err := func() error {
 					log.Printf("dialing psql...")
@@ -88,17 +91,71 @@ func run(ctx context.Context) error {
 				}
 				select {
 				case <-ctx.Done():
-					return
+					return nil
 				case <-time.After(5 * time.Second):
 				}
 			}
-		}()
-		defer func() {
-			if accessLogDB != nil {
-				accessLogDB.Close()
+			return nil
+		}(); err != nil {
+			return err
+		}
+
+		if err := func() error {
+			log.Printf("acquiring lock...")
+			defer log.Printf("/acquiring lock")
+
+			if _, err := accessLogDB.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS distributed_lock(pk TEXT PRIMARY KEY, holder TEXT, last_seen_at TIMESTAMP)`); err != nil {
+				return fmt.Errorf("failed to init distributed locking: %w", err)
 			}
-		}()
+
+			acquiredCh := make(chan struct{}, 0)
+			acquired := sync.OnceFunc(func() {
+				close(acquiredCh)
+			})
+			go func() {
+				me := time.Now().String()
+				c := time.NewTicker(5 * time.Second)
+				defer c.Stop()
+				for range c.C {
+					result, err := accessLogDB.ExecContext(ctx, `
+					INSERT INTO distributed_lock
+						(pk, holder, last_seen_at)
+					VALUES
+						('only', $1, now())
+					ON CONFLICT (pk) DO UPDATE
+						SET holder=$1, last_seen_at=now()
+						WHERE distributed_lock.holder=$1 OR now()-distributed_lock.last_seen_at>interval '10 seconds'
+				`, me)
+					if err != nil {
+						continue
+					}
+					n, err := result.RowsAffected()
+					if err != nil {
+						continue
+					}
+					if n > 0 {
+						acquired()
+					}
+				}
+			}()
+
+			select {
+			case <-acquiredCh:
+			case <-ctx.Done():
+			}
+			return ctx.Err()
+		}(); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return err
 	}
+	defer func() {
+		if accessLogDB != nil {
+			accessLogDB.Close()
+		}
+	}()
 
 	limiter := rate.NewLimiter(rate.Limit(RPS), 1)
 	lastNRequests := make([]any, 0, 50)
