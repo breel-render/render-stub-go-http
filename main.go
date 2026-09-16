@@ -36,6 +36,8 @@ var (
 	JSON = os.Getenv("JSON") != ""
 
 	PSQLConnString = os.Getenv("PSQL_CONN_STRING")
+
+	NGrokToken = os.Getenv("NGROK_TOKEN")
 )
 
 func envOr(k, v string) string {
@@ -72,7 +74,7 @@ func run(ctx context.Context) error {
 	if PSQLConnString == "" {
 	} else if err := func() error {
 		if err := func() error {
-			defer log.Printf("dialed psql...")
+			defer log.Printf("/dialed psql")
 			for {
 				if err := func() error {
 					log.Printf("dialing psql...")
@@ -100,9 +102,10 @@ func run(ctx context.Context) error {
 			return err
 		}
 
-		if err := func() error {
+		if NGrokToken == "" {
+		} else if err := func() error {
 			log.Printf("acquiring lock...")
-			defer log.Printf("/acquiring lock")
+			defer log.Printf("/acquired lock")
 
 			if _, err := accessLogDB.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS distributed_lock(pk TEXT PRIMARY KEY, holder TEXT, last_seen_at TIMESTAMP)`); err != nil {
 				return fmt.Errorf("failed to init distributed locking: %w", err)
@@ -251,8 +254,9 @@ func run(ctx context.Context) error {
 	defer s.Close()
 
 	ngrokURL := ""
-	if token := os.Getenv("NGROK_TOKEN"); token != "" {
-		listener, err := ngrok.Listen(ctx, config.HTTPEndpoint(), ngrok.WithAuthtoken(token))
+	if NGrokToken != "" {
+		log.Printf("ngrokking...")
+		listener, err := ngrok.Listen(ctx, config.HTTPEndpoint(), ngrok.WithAuthtoken(NGrokToken))
 		if err != nil {
 			return err
 		}
@@ -268,6 +272,7 @@ func run(ctx context.Context) error {
 	}
 
 	go func() {
+		log.Printf("listening on %s", s.Addr)
 		if err := http.ListenAndServe(Listen, s.Handler); err != nil && ctx.Err() == nil {
 			panic(err)
 		}
