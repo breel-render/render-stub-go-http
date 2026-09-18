@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -32,6 +33,14 @@ var (
 		"LISTEN",
 		fmt.Sprintf(":%s", envOr("PORT", "10000")),
 	)
+	OtherPorts = func() []string {
+		ports := os.Getenv("PORTS")
+		ports = strings.TrimSpace(ports)
+		if len(ports) == 0 {
+			return nil
+		}
+		return strings.Split(ports, ",")
+	}()
 	RPS  = mustFloat(envOr("RPS", "3"))
 	JSON = os.Getenv("JSON") != ""
 
@@ -70,6 +79,12 @@ func main() {
 }
 
 func run(ctx context.Context) error {
+	for _, otherPort := range OtherPorts {
+		go func(port string) {
+			http.ListenAndServe(":"+port, http.HandlerFunc(http.NotFound))
+		}(otherPort)
+	}
+
 	var accessLogDB *sql.DB
 	if PSQLConnString == "" {
 	} else if err := func() error {
