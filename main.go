@@ -11,8 +11,10 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -206,29 +208,102 @@ func MaybeDial(ctx context.Context) DB {
 	}
 
 	defer log.Printf("/dialed psql")
-	for {
-		var conn *sql.DB
-		if err := func() error {
-			log.Printf("dialing psql...")
-			db, err := sql.Open("postgres", PSQLConnString)
-			if err != nil {
-				return err
-			}
-			if err := db.PingContext(ctx); err != nil {
-				defer db.Close()
-				return err
-			}
-			conn = db
-			return nil
-		}(); err == nil {
-			return db{DB: conn}
+
+	if u, err := url.Parse(PSQLConnString); err != nil || u.Scheme == "" {
+	} else if err := blockUntilTCP(ctx, u.Host); err != nil {
+		panic(err)
+	} else if err := func() error {
+		u2 := u
+		u2.Path = "/postgres"
+
+		db, err := blockUntilPSQL(ctx, u2.String())
+		if err != nil {
+			return err
 		}
+		defer db.Close()
+
+		dbname := path.Base(u.Path)
+
+		var n int
+		if err := db.DB.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM pg_database WHERE datname=$1
+		`, dbname).Scan(&n); err != nil || n < 1 {
+			if _, err := db.Exec(ctx, `CREATE DATABASE `+dbname); err != nil {
+				return fmt.Errorf("no dbname %q but failed to create: %w", dbname, err)
+			}
+		}
+
+		return nil
+	}(); err != nil {
+		panic(err)
+	}
+
+	db, err := blockUntilPSQL(ctx, PSQLConnString)
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
+
+func blockUntilTCP(ctx context.Context, addr string) error {
+	if !strings.Contains(addr, ":") {
+		addr += ":5432"
+	}
+
+	log.Printf("tcp dialing %s...", addr)
+	defer log.Printf("/tcp dialed %s", addr)
+
+	d := net.Dialer{}
+	return retry(ctx, func() error {
+		c, err := d.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		return nil
+	})
+}
+
+func blockUntilPSQL(ctx context.Context, connURL string) (db, error) {
+	defer log.Printf("/psqld %s", connURL)
+
+	var some *sql.DB
+	err := retry(ctx, func() error {
+		log.Printf("psqling %s...", connURL)
+
+		a, err := sql.Open("postgres", connURL)
+		if err != nil {
+			return err
+		}
+		if err := a.PingContext(ctx); err != nil {
+			defer a.Close()
+			return err
+		}
+		some = a
+		return nil
+	})
+	return db{DB: some}, err
+}
+
+func retry(ctx context.Context, foo func() error) error {
+	var lastErr error
+	for ctx.Err() == nil {
+		lastErr = foo()
+		if lastErr == nil {
+			return nil
+		}
+
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctx.Err()
 		case <-time.After(5 * time.Second):
 		}
 	}
+	if lastErr != nil {
+		return lastErr
+	}
+	return ctx.Err()
 }
 
 type nodb struct{}
