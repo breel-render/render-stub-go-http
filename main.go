@@ -189,12 +189,7 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to ngrok listen: %w", err)
 	}
 
-	go func() {
-		log.Printf("listening on %s", s.Addr)
-		if err := http.ListenAndServe(Listen, s.Handler); err != nil && ctx.Err() == nil {
-			panic(err)
-		}
-	}()
+	go httpListen(ctx, s)
 
 	{
 		m := map[string]any{
@@ -329,4 +324,11 @@ func ngrokListen(ctx context.Context, s *http.Server) (string, error) {
 	}()
 
 	return listener.URL(), nil
+}
+
+func httpListen(ctx context.Context, s *http.Server) {
+	log.Printf("listening on %s", s.Addr)
+	if err := http.ListenAndServe(Listen, s.Handler); err != nil && ctx.Err() == nil {
+		panic(err)
+	}
 }
