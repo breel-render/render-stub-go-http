@@ -213,7 +213,7 @@ func MaybeDial(ctx context.Context) DB {
 	} else if err := blockUntilTCP(ctx, u.Host); err != nil {
 		panic(err)
 	} else if err := func() error {
-		u2 := u
+		u2 := *u
 		u2.Path = "/postgres"
 
 		db, err := blockUntilPSQL(ctx, u2.String())
@@ -225,9 +225,10 @@ func MaybeDial(ctx context.Context) DB {
 		dbname := path.Base(u.Path)
 
 		var n int
-		if err := db.DB.QueryRowContext(ctx, `
+		err = db.DB.QueryRowContext(ctx, `
 			SELECT COUNT(*) FROM pg_database WHERE datname=$1
-		`, dbname).Scan(&n); err != nil || n < 1 {
+		`, dbname).Scan(&n)
+		if err != nil || n < 1 {
 			if _, err := db.Exec(ctx, `CREATE DATABASE `+dbname); err != nil {
 				return fmt.Errorf("no dbname %q but failed to create: %w", dbname, err)
 			}
