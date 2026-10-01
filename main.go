@@ -80,9 +80,7 @@ func main() {
 
 func run(ctx context.Context) error {
 	for _, otherPort := range OtherPorts {
-		go func(port string) {
-			http.ListenAndServe(":"+port, http.HandlerFunc(http.NotFound))
-		}(otherPort)
+		go _httpListen(ctx, ":"+otherPort, http.HandlerFunc(http.NotFound))
 	}
 
 	accessLogDB := MaybeDial(ctx)
@@ -191,15 +189,7 @@ func run(ctx context.Context) error {
 
 	go httpListen(ctx, s)
 
-	{
-		m := map[string]any{
-			"$RENDER_EXTERNAL_URL": os.Getenv("RENDER_EXTERNAL_URL"),
-			"Listen":               Listen,
-			"ngrokURL":             ngrokURL,
-		}
-		b, _ := json.Marshal(m)
-		log.Printf("env | %s", b)
-	}
+	logEnv(ngrokURL)
 
 	<-ctx.Done()
 	return ctx.Err()
@@ -328,7 +318,21 @@ func ngrokListen(ctx context.Context, s *http.Server) (string, error) {
 
 func httpListen(ctx context.Context, s *http.Server) {
 	log.Printf("listening on %s", s.Addr)
-	if err := http.ListenAndServe(Listen, s.Handler); err != nil && ctx.Err() == nil {
+	_httpListen(ctx, Listen, s.Handler)
+}
+
+func _httpListen(ctx context.Context, listen string, h http.Handler) {
+	if err := http.ListenAndServe(listen, h); err != nil && ctx.Err() == nil {
 		panic(err)
 	}
+}
+
+func logEnv(ngrokURL string) {
+	m := map[string]any{
+		"$RENDER_EXTERNAL_URL": os.Getenv("RENDER_EXTERNAL_URL"),
+		"Listen":               Listen,
+		"ngrokURL":             ngrokURL,
+	}
+	b, _ := json.Marshal(m)
+	log.Printf("env | %s", b)
 }
