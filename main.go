@@ -87,6 +87,7 @@ func run(ctx context.Context) error {
 
 	accessLogDB := MaybeDial(ctx)
 	defer accessLogDB.Close()
+
 	if NGrokToken == "" {
 	} else if err := AcquireDistributedLock(ctx, accessLogDB); err != nil {
 		return fmt.Errorf("failed to acquire distributed lock: %w", err)
@@ -183,22 +184,9 @@ func run(ctx context.Context) error {
 	}
 	defer s.Close()
 
-	ngrokURL := ""
-	if NGrokToken != "" {
-		log.Printf("ngrokking...")
-		listener, err := ngrok.Listen(ctx, config.HTTPEndpoint(), ngrok.WithAuthtoken(NGrokToken))
-		if err != nil {
-			return err
-		}
-		defer listener.Close()
-
-		go func() {
-			if err := http.Serve(listener, s.Handler); err != nil && ctx.Err() == nil {
-				panic(err)
-			}
-		}()
-
-		ngrokURL = listener.URL()
+	ngrokURL, err := ngrokListen(ctx, s)
+	if err != nil {
+		return fmt.Errorf("failed to ngrok listen: %w", err)
 	}
 
 	go func() {
@@ -320,4 +308,25 @@ func AcquireDistributedLock(ctx context.Context, db DB) error {
 	case <-ctx.Done():
 	}
 	return ctx.Err()
+}
+
+func ngrokListen(ctx context.Context, s *http.Server) (string, error) {
+	if NGrokToken == "" {
+		return "", nil
+	}
+
+	log.Printf("ngrokking...")
+	listener, err := ngrok.Listen(ctx, config.HTTPEndpoint(), ngrok.WithAuthtoken(NGrokToken))
+	if err != nil {
+		return "", err
+	}
+	defer listener.Close()
+
+	go func() {
+		if err := http.Serve(listener, s.Handler); err != nil && ctx.Err() == nil {
+			panic(err)
+		}
+	}()
+
+	return listener.URL(), nil
 }
