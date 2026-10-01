@@ -87,7 +87,8 @@ func run(ctx context.Context) error {
 
 	accessLogDB := MaybeDial(ctx)
 	defer accessLogDB.Close()
-	if err := AcquireDistributedLock(ctx, accessLogDB); err != nil {
+	if NGrokToken == "" {
+	} else if err := AcquireDistributedLock(ctx, accessLogDB); err != nil {
 		return fmt.Errorf("failed to acquire distributed lock: %w", err)
 	}
 
@@ -280,10 +281,6 @@ func (db db) Exec(ctx context.Context, q string, args ...any) (int64, error) {
 }
 
 func AcquireDistributedLock(ctx context.Context, db DB) error {
-	if NGrokToken == "" {
-		return nil
-	}
-
 	log.Printf("acquiring lock...")
 	defer log.Printf("/acquired lock")
 
