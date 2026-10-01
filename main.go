@@ -254,7 +254,7 @@ func blockUntilTCP(ctx context.Context, addr string) error {
 	defer log.Printf("/tcp dialed %s", addr)
 
 	d := net.Dialer{}
-	return retry(ctx, func() error {
+	return retry(ctx, func(ctx context.Context) error {
 		c, err := d.DialContext(ctx, "tcp", addr)
 		if err != nil {
 			return err
@@ -269,7 +269,7 @@ func blockUntilPSQL(ctx context.Context, connURL string) (db, error) {
 	defer log.Printf("/psqld %s", connURL)
 
 	var some *sql.DB
-	err := retry(ctx, func() error {
+	err := retry(ctx, func(ctx context.Context) error {
 		log.Printf("psqling %s...", connURL)
 
 		a, err := sql.Open("postgres", connURL)
@@ -286,10 +286,13 @@ func blockUntilPSQL(ctx context.Context, connURL string) (db, error) {
 	return db{DB: some}, err
 }
 
-func retry(ctx context.Context, foo func() error) error {
+func retry(ctx context.Context, foo func(context.Context) error) error {
 	var lastErr error
 	for ctx.Err() == nil {
-		lastErr = foo()
+		ctx, can := context.WithTimeout(ctx, 5*time.Second)
+		defer can()
+
+		lastErr = foo(ctx)
 		if lastErr == nil {
 			return nil
 		}
