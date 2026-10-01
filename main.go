@@ -289,10 +289,10 @@ func blockUntilPSQL(ctx context.Context, connURL string) (db, error) {
 func retry(ctx context.Context, foo func(context.Context) error) error {
 	var lastErr error
 	for ctx.Err() == nil {
-		ctx, can := context.WithTimeout(ctx, 5*time.Second)
+		subctx, can := context.WithTimeout(ctx, 5*time.Second)
 		defer can()
 
-		lastErr = foo(ctx)
+		lastErr = foo(subctx)
 		if lastErr == nil {
 			return nil
 		}
