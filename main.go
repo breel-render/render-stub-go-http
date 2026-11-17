@@ -384,9 +384,9 @@ func ngrokListen(ctx context.Context, s *http.Server) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer listener.Close()
 
 	go func() {
+		defer listener.Close()
 		if err := http.Serve(listener, s.Handler); err != nil && ctx.Err() == nil {
 			panic(err)
 		}
